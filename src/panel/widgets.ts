@@ -114,12 +114,12 @@ export const WIDGETS: WidgetSpec[] = [
   {
     kind: 'newSession',
     title: 'New session',
-    description: 'A button that opens a new terminal window with claude, optionally with a first prompt (macOS).',
+    description: 'A button that opens a new terminal window with claude, optionally with a first prompt.',
     group: 'Agents & sessions',
     make: () => ({ kind: 'newSession', title: 'New session', app: 'Terminal', cwd: '', prompt: '', label: 'Open a new session' }),
     fields: [
       { key: 'label', label: 'Button text', kind: 'text' },
-      { key: 'app', label: 'Terminal', kind: 'select', options: ['Terminal', 'iTerm'] },
+      { key: 'app', label: 'Terminal on macOS', kind: 'select', options: ['Terminal', 'iTerm'], hint: 'Linux opens the first installed terminal (GNOME Terminal, Konsole, xterm…); Windows opens cmd' },
       { key: 'cwd', label: 'Folder (empty = current)', kind: 'text', hint: 'Absolute, ~/…, or relative to the current folder' },
       { key: 'prompt', label: 'Default first prompt', kind: 'text' },
     ],

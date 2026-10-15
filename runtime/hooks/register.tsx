@@ -79,6 +79,81 @@ function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
 }
 
+// ── platform ───────────────────────────────────────────────
+// Shell commands, process checks, the home folder and new terminal windows differ per OS.
+
+type Os = 'mac' | 'linux' | 'windows'
+let osCache: Os | undefined
+
+async function os($: EngineInterface): Promise<Os> {
+  if (osCache) return osCache
+  if ((await $.env.get('OS')) === 'Windows_NT' || (await $.env.get('ComSpec'))) return (osCache = 'windows')
+  const r = await $.process.run(['uname', '-s'], { timeoutMs: 3000 }).catch(() => null)
+  return (osCache = r?.stdout.trim() === 'Darwin' ? 'mac' : 'linux')
+}
+
+async function homeDir($: EngineInterface): Promise<string | undefined> {
+  return (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+}
+
+/**
+ * Runs a command line in the platform's shell. On Windows the line travels in an environment
+ * variable, so cmd.exe reads it as typed: a quoted argument would reach it with its quotes escaped.
+ */
+async function runLine($: EngineInterface, line: string, init: { cwd?: string; timeoutMs?: number } = {}) {
+  if ((await os($)) === 'windows') return $.process.run(['cmd.exe', '/d', '/c', '%CC_LINE%'], { ...init, env: { CC_LINE: line } })
+  return $.process.run(['sh', '-c', line], init)
+}
+
+/** One argument quoted for the platform's shell. */
+async function quoteArg($: EngineInterface, s: string): Promise<string> {
+  return (await os($)) === 'windows' ? `"${s.replace(/"/g, '""')}"` : shq(s)
+}
+
+/** The process ids among `pids` that are still running. */
+async function alivePids($: EngineInterface, pids: number[]): Promise<Set<number>> {
+  if (!pids.length) return new Set()
+  if ((await os($)) === 'windows') {
+    const r = await $.process.run(['tasklist', '/FO', 'CSV', '/NH'], { timeoutMs: 5000 }).catch(() => null)
+    const running = new Set((r?.stdout ?? '').split('\n').map(l => Number(l.split('","')[1])).filter(Boolean))
+    return new Set(pids.filter(p => running.has(p)))
+  }
+  const r = await $.process.run(['ps', '-o', 'pid=', '-p', pids.join(',')], { timeoutMs: 3000 }).catch(() => null)
+  return new Set((r?.stdout ?? '').split('\n').map(s => Number(s.trim())).filter(Boolean))
+}
+
+/** The command line that opens a new terminal window running `claude` in `cwd`, for runLine (or argv on macOS). */
+async function terminalCommand($: EngineInterface, app: 'Terminal' | 'iTerm', cwd: string, prompt: string): Promise<string | string[]> {
+  const system = await os($)
+  if (system === 'windows') {
+    const first = prompt ? ` "${prompt.replace(/"/g, "'")}"` : ''
+    return `start "" /D "${cwd}" cmd /k claude${first}`
+  }
+  const sh = `cd ${shq(cwd)} && claude${prompt ? ' ' + shq(prompt) : ''}`
+  if (system === 'mac') {
+    const as = JSON.stringify(sh)
+    const script =
+      app === 'iTerm'
+        ? `tell application "iTerm"\ncreate window with default profile\ntell current session of current window to write text ${as}\nactivate\nend tell`
+        : `tell application "Terminal"\ndo script ${as}\nactivate\nend tell`
+    return ['osascript', '-e', script]
+  }
+  // Linux: the first terminal emulator that is installed, detached from this process
+  const c = shq(`${sh}; exec "\${SHELL:-sh}"`)
+  const tries = [
+    ['gnome-terminal', '-- sh -c "$c"'],
+    ['konsole', '-e sh -c "$c"'],
+    ['xfce4-terminal', '-x sh -c "$c"'],
+    ['x-terminal-emulator', '-e sh -c "$c"'],
+    ['kitty', 'sh -c "$c"'],
+    ['alacritty', '-e sh -c "$c"'],
+    ['wezterm', 'start -- sh -c "$c"'],
+    ['xterm', '-e sh -c "$c"'],
+  ]
+  const chain = tries.map(([t, args], i) => `${i ? 'elif' : 'if'} command -v ${t} >/dev/null 2>&1; then nohup ${t} ${args} >/dev/null 2>&1 &`).join('\n')
+  return `c=${c}\n${chain}\nelse echo "no terminal emulator found" >&2; exit 1\nfi`
+}
+
 function clip(s: string, n: number): string {
   const t = s.replace(/\s+/g, ' ').trim()
   return t.length > n ? t.slice(0, n - 1) + '…' : t
@@ -200,7 +275,7 @@ async function refreshDiff($: EngineInterface, w: Of<'diff'>) {
 }
 
 async function refreshPeers($: EngineInterface) {
-  const home = await $.env.get('HOME')
+  const home = await homeDir($)
   if (!home) return
   const dir = `${home}/.claude/sessions`
   const self = await $.session.id()
@@ -228,14 +303,8 @@ async function refreshPeers($: EngineInterface) {
     await setOutput($, 'peers', `Cannot read ${dir}: ${String(err)}`)
     return
   }
-  const pids = rows.map(r => r.pid).filter(p => p > 0)
-  if (pids.length) {
-    const ps = await $.process.run(['ps', '-o', 'pid=', '-p', pids.join(',')], { timeoutMs: 3000 })
-    const alive = new Set(ps.stdout.split('\n').map(s => Number(s.trim())).filter(Boolean))
-    await update($, S_peers, () => rows.filter(r => alive.has(r.pid)).sort((a, b) => b.updatedAt - a.updatedAt))
-  } else {
-    await update($, S_peers, () => [])
-  }
+  const alive = await alivePids($, rows.map(r => r.pid).filter(p => p > 0))
+  await update($, S_peers, () => rows.filter(r => alive.has(r.pid)).sort((a, b) => b.updatedAt - a.updatedAt))
 }
 
 async function refreshMessages($: EngineInterface) {
@@ -257,13 +326,13 @@ async function refreshInventory($: EngineInterface) {
 }
 
 async function cwdPath($: EngineInterface, path: string): Promise<string> {
-  if (path.startsWith('/')) return path
-  if (path.startsWith('~/')) return `${(await $.env.get('HOME')) ?? ''}${path.slice(1)}`
+  if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')) return path
+  if (path.startsWith('~/') || path.startsWith('~\\')) return `${(await homeDir($)) ?? ''}${path.slice(1)}`
   return `${await $.session.cwd()}/${path}`
 }
 
 async function refreshShell($: EngineInterface, w: Of<'shell'>) {
-  const r = await $.process.run(['sh', '-c', w.command], { cwd: await $.session.cwd(), timeoutMs: 15_000 })
+  const r = await runLine($, w.command, { cwd: await $.session.cwd(), timeoutMs: 15_000 })
   const text = (r.stdout + (r.exitCode !== 0 ? r.stderr : '')).trimEnd().split('\n').slice(-w.lines).join('\n')
   await setOutput($, w.id, text || '(empty)')
 }
@@ -349,14 +418,10 @@ async function spawn($: EngineInterface, p: { label: string; type: string; promp
 
 async function openSession($: EngineInterface, w: Of<'newSession'>, prompt: string) {
   const cwd = w.cwd.trim() ? await cwdPath($, w.cwd.trim()) : await $.session.cwd()
-  const sh = `cd ${shq(cwd)} && claude${prompt.trim() ? ' ' + shq(prompt.trim()) : ''}`
-  const as = JSON.stringify(sh)
-  const script =
-    w.app === 'iTerm'
-      ? `tell application "iTerm"\ncreate window with default profile\ntell current session of current window to write text ${as}\nactivate\nend tell`
-      : `tell application "Terminal"\ndo script ${as}\nactivate\nend tell`
-  const r = await $.process.run(['osascript', '-e', script], { timeoutMs: 10_000 })
-  await flash($, r.exitCode === 0 ? `Opened a new session in ${w.app}` : `Did not open: ${r.stderr.trim()}`)
+  const command = await terminalCommand($, w.app, cwd, prompt.trim())
+  const run = typeof command === 'string' ? runLine($, command, { timeoutMs: 10_000 }) : $.process.run(command, { timeoutMs: 10_000 })
+  const r = await run.catch((err: unknown) => ({ exitCode: -1, stderr: String(err) }))
+  await flash($, r.exitCode === 0 ? 'Opened a new session' : `Did not open: ${r.stderr.trim()}`)
 }
 
 async function askSession($: EngineInterface, id: string, question: string) {
@@ -370,7 +435,7 @@ async function runAi($: EngineInterface, id: string, p: AiPreset) {
   await setOutput($, id, `… ${p.label}`)
   let prompt = p.prompt
   if (p.context.trim()) {
-    const ctx = await $.process.run(['sh', '-c', p.context], { cwd: await $.session.cwd(), timeoutMs: 15_000 })
+    const ctx = await runLine($, p.context, { cwd: await $.session.cwd(), timeoutMs: 15_000 })
     prompt += `\n\n<context command="${p.context}">\n${ctx.stdout.slice(0, 60_000)}\n</context>`
   }
   const model = p.model || 'haiku'
@@ -553,7 +618,8 @@ export const register: Register = on => {
     if (own) {
       await update($, S_counters, c => ({ ...c, [own.id]: (c[own.id] ?? 0) + 1 }))
       const arg = String(input.input ?? '')
-      const r = await $.process.run(['sh', '-c', own.command.split('{{input}}').join(shq(arg))], { cwd: await $.session.cwd(), timeoutMs: 60_000 })
+      const line = own.command.split('{{input}}').join(await quoteArg($, arg))
+      const r = await runLine($, line, { cwd: await $.session.cwd(), timeoutMs: 60_000 })
       const text = (r.stdout + (r.exitCode !== 0 ? `\n[exit ${r.exitCode}] ${r.stderr}` : '')).slice(0, 50_000) || '(no output)'
       return { result: text, text }
     }
@@ -592,7 +658,8 @@ export const register: Register = on => {
     const Select = 'Select' in el ? el.Select : undefined
     const Image = 'Image' in el ? el.Image : undefined
     const now = await $.clock.now()
-    const home = await $.env.get('HOME')
+    const home = await homeDir($)
+    const system = await os($)
     const drafts = await read($, S_drafts)
     const expanded = await read($, S_expanded)
     const outputs = await read($, S_outputs)
@@ -814,7 +881,7 @@ export const register: Register = on => {
             <Box key={`${w.id}-row`} gap={1}>
               <Button key={`${w.id}-open`} label={w.label || 'New session'} variant="primary" onPress={() => void openSession($, w, drafts[`${w.id}:prompt`] ?? w.prompt)} />
               <Text dimColor>
-                {w.app}
+                {system === 'mac' ? w.app : system === 'windows' ? 'cmd' : 'terminal'}
                 {w.cwd ? ` · ${w.cwd}` : ' · this folder'}
               </Text>
             </Box>,

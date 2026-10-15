@@ -115,7 +115,7 @@ export function InstallPanel({ name, command, files, source }: { name: string; c
                     })
                   }
                 >
-                  Open a new session in Terminal
+                  Open a new session in a terminal
                 </button>
               </div>
               {launched && <span className="muted">Opened.</span>}

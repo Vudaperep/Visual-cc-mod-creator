@@ -9,7 +9,7 @@
     "build": "tsc -p . && vite build",
     "typecheck": "tsc -p .",
     "sync-types": "node scripts/sync-types.mjs",
-    "test:panel": "sh scripts/test-panel.sh"
+    "test:panel": "node scripts/test-panel.mjs"
   },
   "engines": {
     "node": ">=20"

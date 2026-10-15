@@ -9,7 +9,14 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const URL_ = process.argv[2] ?? 'http://127.0.0.1:5177/'
-const CHROME = process.argv[3] ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const CHROME =
+  process.argv[3] ??
+  process.env.CHROME ??
+  {
+    darwin: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    win32: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  }[process.platform] ??
+  'google-chrome'
 const PORT = 9334
 const W = 1280
 const H = 760

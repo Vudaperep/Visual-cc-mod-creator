@@ -20,9 +20,16 @@ export const SOURCE_FILE = 'visual-cc-mod-creator.json'
 
 type Run = { code: number; out: string }
 
-function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs?: number } = {}): Promise<Run> {
+const IS_WINDOWS = process.platform === 'win32'
+
+/** An argument for cmd.exe, which Node hands the whole line to when `shell` is on. */
+const cmdArg = (a: string) => (/[\s"&|<>^]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a)
+
+function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {}): Promise<Run> {
   return new Promise(res => {
-    const p = spawn(cmd, args, { cwd: opts.cwd ?? homedir(), env: process.env })
+    // on Windows `claude` may be an npm shim (claude.cmd), which only a shell finds
+    const viaShell = IS_WINDOWS && cmd === 'claude'
+    const p = spawn(cmd, viaShell ? args.map(cmdArg) : args, { cwd: opts.cwd ?? homedir(), env: { ...process.env, ...opts.env }, shell: viaShell })
     let out = ''
     p.stdout.on('data', d => (out += d))
     p.stderr.on('data', d => (out += d))
@@ -69,6 +76,21 @@ async function typecheck(files: Record<string, string>): Promise<Run> {
   } finally {
     await rm(tmp, { recursive: true, force: true })
   }
+}
+
+/** The oldest Claude Code the panels were tested with; older builds may lack function-hook plugins. */
+const TESTED_FROM = [2, 1, 292]
+
+async function versionHint(): Promise<string | null> {
+  const r = await run('claude', ['--version'])
+  const v = r.out.match(/(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number)
+  if (!v) return null
+  for (let i = 0; i < 3; i++) {
+    if (v[i]! > TESTED_FROM[i]!) return null
+    if (v[i]! < TESTED_FROM[i]!)
+      return `Claude Code ${v.join('.')} is older than ${TESTED_FROM.join('.')}, the oldest version panels are tested with, and may not support function-hook plugins. Run \`claude update\` and install again.`
+  }
+  return null
 }
 
 function validate(dir: string): Promise<Run> {
@@ -150,7 +172,11 @@ async function install(body: { name?: string; files?: Record<string, string>; so
     { title: 'TypeScript', run: tsc },
     { title: 'claude plugin validate', run: val },
   ]
-  if (val.code !== 0) return { dir, steps, installed: false, wasInstalled: false }
+  if (val.code !== 0) {
+    const hint = await versionHint()
+    if (hint) steps.push({ title: 'Claude Code version', run: { code: 1, out: hint } })
+    return { dir, steps, installed: false, wasInstalled: false }
+  }
 
   await writeMarketplace()
   const added = await ensureMarketplace()
@@ -195,15 +221,35 @@ async function check(body: { files?: Record<string, string> }) {
   }
 }
 
-/** Opens a new Terminal window with a fresh claude session (installed panels load in it). macOS only. */
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+
+/** Opens a new terminal window with a fresh claude session (installed panels load in it). */
 async function launch(body: { cwd?: string }) {
-  if (process.platform !== 'darwin') throw new Error('Opening a terminal window is supported on macOS only. Run `claude` yourself.')
-  const cwd = body.cwd ? resolve(String(body.cwd).replace(/^~(?=$|\/)/, homedir())) : homedir()
-  const sh = `cd ${JSON.stringify(cwd)} && claude`
-  const script = `tell application "Terminal" to do script ${JSON.stringify(sh)}\ntell application "Terminal" to activate`
-  const r = await run('osascript', ['-e', script])
-  if (r.code !== 0) throw new Error(r.out)
-  return { command: sh }
+  const cwd = body.cwd ? resolve(String(body.cwd).replace(/^~(?=$|[\\/])/, homedir())) : homedir()
+  let r: Run
+  if (IS_WINDOWS) {
+    // the line travels in an environment variable so cmd.exe reads its quotes as typed
+    r = await run('cmd.exe', ['/d', '/c', '%CC_LINE%'], { env: { CC_LINE: `start "" /D "${cwd}" cmd /k claude` } })
+  } else if (process.platform === 'darwin') {
+    const script = `tell application "Terminal" to do script ${JSON.stringify(`cd ${shq(cwd)} && claude`)}\ntell application "Terminal" to activate`
+    r = await run('osascript', ['-e', script])
+  } else {
+    const c = shq(`cd ${shq(cwd)} && claude; exec "\${SHELL:-sh}"`)
+    const tries: [string, string][] = [
+      ['gnome-terminal', '-- sh -c "$c"'],
+      ['konsole', '-e sh -c "$c"'],
+      ['xfce4-terminal', '-x sh -c "$c"'],
+      ['x-terminal-emulator', '-e sh -c "$c"'],
+      ['kitty', 'sh -c "$c"'],
+      ['alacritty', '-e sh -c "$c"'],
+      ['wezterm', 'start -- sh -c "$c"'],
+      ['xterm', '-e sh -c "$c"'],
+    ]
+    const chain = tries.map(([t, a], i) => `${i ? 'elif' : 'if'} command -v ${t} >/dev/null 2>&1; then nohup ${t} ${a} >/dev/null 2>&1 &`).join('\n')
+    r = await run('sh', ['-c', `c=${c}\n${chain}\nelse echo "No terminal emulator found. Run claude yourself." >&2; exit 1\nfi`])
+  }
+  if (r.code !== 0) throw new Error(r.out.trim() || 'Could not open a terminal')
+  return { command: 'claude' }
 }
 
 async function readJson(req: IncomingMessage): Promise<any> {

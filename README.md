@@ -31,9 +31,22 @@ The **Code** tab shows the exact files of the plugin, updated as you edit. **Ins
 
 ## Requirements
 
-- Claude Code with function-hook plugins (mods); tested with 2.1.301
+- Claude Code **2.1.292 or newer** (the plugins use function hooks; 2.1.197 does not have them). Run `claude update` if needed.
 - Node.js 20+
-- macOS for the “open a new session” buttons (everything else is platform independent)
+- macOS, Linux or Windows
+
+## Platforms
+
+| | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| Builder: edit, preview, install | ✅ tested | ✅ tested (Docker, Debian) | ⚠️ not tested yet |
+| Panel widgets | ✅ tested | ✅ tested | ⚠️ unit-tested only |
+| Command widgets (Command output, AI buttons, Tool for Claude) | `sh` | `sh` | `cmd.exe` |
+| New session button | Terminal or iTerm | the first installed of GNOME Terminal, Konsole, Xfce Terminal, x-terminal-emulator, kitty, Alacritty, WezTerm, xterm | `cmd` window |
+| Sessions on this machine | `ps` | `ps` | `tasklist` |
+| Image widget | kitty, Ghostty | kitty, Ghostty | caption only |
+
+On Windows, write command widgets in `cmd` syntax. Reports from Windows users are very welcome.
 
 ## Run it
 
@@ -53,7 +66,7 @@ Build a panel, open the **Install** tab and press **Install into Claude Code**. 
 2. **Catalog**: add an entry to `WIDGETS` in `src/panel/widgets.ts`: title, group, description, defaults (`make`) and the settings fields the editor shows.
 3. **Runtime**: draw it in the `ui.render` Pane hook in `runtime/hooks/register.tsx`, and fetch its data in a `refresh…` function (or a hook) if it has any. Keep values a drawing reads in `$.state` (`runtime/types/index.d.ts`).
 4. **Preview**: add a case with mock data to `WidgetPreview` in `src/panel/Preview.tsx`.
-5. **Test**: give it sample data in `scripts/seed-panel.py` and run `npm run test:panel`.
+5. **Test**: give it sample data in `seed()` in `scripts/test-panel.mjs` and run `npm run test:panel`.
 
 ## Tests
 
@@ -61,9 +74,9 @@ Build a panel, open the **Install** tab and press **Install into Claude Code**. 
 npm run test:panel
 ```
 
-This generates a panel with every widget, then type-checks it, validates it with `claude plugin validate`, seeds it with sample data, and runs `claude plugin test`. The test draws the pane and the summary line on the terminal, desktop, VS Code and mobile surfaces, and checks that a guard blocks a matching tool call.
+It runs anywhere Node and the `claude` CLI run. This generates a panel with every widget, then type-checks it, validates it with `claude plugin validate`, seeds it with sample data, and runs `claude plugin test`. The test draws the pane and the summary line on the terminal, desktop, VS Code and mobile surfaces, checks that a guard blocks a matching tool call, and checks how a tool’s command line is run on Windows (`cmd.exe`) and on Linux (`sh`).
 
-`node scripts/screenshots.mjs [url]` retakes the screenshots in `docs/`, and `node scripts/demo-gif.mjs [url]` records `docs/demo.gif` (needs ffmpeg), both from a running builder with headless Chrome.
+`node scripts/screenshots.mjs [url]` retakes the screenshots in `docs/`, and `node scripts/demo-gif.mjs [url]` records `docs/demo.gif` (needs ffmpeg), both from a running builder with headless Chrome (set `CHROME` to its path if it is not found).
 
 ## Uninstall a panel
 

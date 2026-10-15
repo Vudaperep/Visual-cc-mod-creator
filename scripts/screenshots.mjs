@@ -87,14 +87,8 @@ try {
   await load(DASHBOARD)
   await shot('screenshot')
 
-  await click('.t-section', 1)
-  await shot('widget-settings')
-
   await click('.tabs button', 1)
   await shot('code')
-
-  await click('.tabs button', 2)
-  await shot('install')
 
   await size(1440, 1100)
   await load(AI)

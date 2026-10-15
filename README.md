@@ -2,27 +2,19 @@
 
 A visual builder for [Claude Code](https://docs.claude.com/en/docs/claude-code) panes. Pick widgets, arrange them in a live terminal preview, and install the result into Claude Code with one click. No hook code to write.
 
-![The builder: widgets on the left, a terminal preview in the middle, panel settings on the right](docs/screenshot.png)
+![Demo: add widgets, rename the pane, edit a button, see the generated code, install](docs/demo.gif)
 
 A panel is a regular Claude Code plugin (a "mod" built on function hooks). It opens with its own slash command, such as `/dash`, and can add a one-line summary above the prompt. It works in every session once installed.
 
 ## What it looks like
 
-**Set up a widget.** Click a section in the preview: its settings open on the right. Drag sections to reorder them, and click the pane title to rename it.
-
-![Widget settings: the “Start a subagent” section is selected and its buttons are edited on the right](docs/widget-settings.png)
-
-**AI helpers and behaviour.** Turn control, questions about the session, AI buttons over a command’s output, next-step suggestions, a context chart, guards that block tool calls, and notes kept across sessions.
+Click a section in the preview to set it up on the right, drag sections to reorder them, and click the pane title to rename it. A panel can mix agents and sessions with AI helpers and behaviour: turn control, questions about the session, AI buttons over a command’s output, next-step suggestions, guards that block tool calls, notes kept across sessions.
 
 ![A “Copilot” panel with turn control, AI widgets, guards and notes](docs/ai-and-behaviour.png)
 
-**The code it generates.** The Code tab shows the exact files of the plugin, updated as you edit.
+The **Code** tab shows the exact files of the plugin, updated as you edit. **Install** type-checks and validates them, then installs the plugin with `claude plugin install`.
 
 ![The Code tab with hooks/register.tsx and the panel’s config](docs/code.png)
-
-**One-click install.** The builder type-checks and validates the plugin, then installs it with `claude plugin install`.
-
-![The Install tab](docs/install.png)
 
 ## Widgets
 
@@ -145,7 +137,7 @@ npm run test:panel
 
 This generates a panel with every widget, then type-checks it, validates it with `claude plugin validate`, seeds it with sample data, and runs `claude plugin test`. The test draws the pane and the summary line on the terminal, desktop, VS Code and mobile surfaces, and checks that a guard blocks a matching tool call.
 
-`node scripts/screenshots.mjs [url]` retakes the screenshots in `docs/` from a running builder, with headless Chrome.
+`node scripts/screenshots.mjs [url]` retakes the screenshots in `docs/`, and `node scripts/demo-gif.mjs [url]` records `docs/demo.gif` (needs ffmpeg), both from a running builder with headless Chrome.
 
 ## Uninstall a panel
 

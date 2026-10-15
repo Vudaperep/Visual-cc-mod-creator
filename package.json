@@ -1,0 +1,35 @@
+{
+  "name": "visual-cc-mod-creator",
+  "version": "0.1.0",
+  "description": "A visual builder for Claude Code panes: pick widgets, see a live terminal preview, install with one click.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build",
+    "typecheck": "tsc -p .",
+    "sync-types": "node scripts/sync-types.mjs",
+    "test:panel": "sh scripts/test-panel.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Vudaperep/visual-cc-mod-creator.git"
+  }
+}
